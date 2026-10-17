@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Conan Manager · Episodi 1–1172</title>
+  <script>try{const saved=localStorage.getItem('conan-theme');document.documentElement.dataset.theme=saved||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light')}catch(e){}</script>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="hero">
+    <div>
+      <p class="eyebrow">Raccolta locale</p>
+      <h1>Conan Manager</h1>
+      <p class="subtitle">Scegli la cartella della raccolta: il sito trova automaticamente gli episodi anche nelle sottocartelle delle stagioni.</p>
+    </div>
+    <div class="hero-actions"><button id="themeToggle" class="theme-toggle" type="button">Tema scuro</button><div class="folder folder-list" id="folders">Caricamento cartelle…</div></div>
+  </header>
+
+  <main>
+    <section class="stats" aria-label="Riepilogo">
+      <div><strong id="fileCount">—</strong><span>episodi presenti</span></div>
+      <div><strong id="mp4Count">—</strong><span>MP4</span></div>
+      <div><strong id="movCount">—</strong><span>MOV</span></div>
+      <div><strong id="watchedCount">—</strong><span>visti</span></div>
+      <div><strong id="visibleCount">—</strong><span>visualizzati</span></div>
+    </section>
+
+    <section class="notice">
+      <strong>Come funziona</strong>
+      <span>La raccolta viene controllata automaticamente ogni 15 secondi. I numeri vengono letti dal nome del file; puoi sempre correggerli dalla schermata “Modifica”.</span>
+    </section>
+
+    <section id="continuePanel" class="continue-panel hidden" aria-label="Continua a guardare">
+      <div><p class="eyebrow">Continua a guardare</p><strong id="continueTitle">—</strong><span id="continueTime">—</span></div>
+      <button id="continueButton" class="play" type="button">Riprendi</button>
+    </section>
+
+    <section class="folder-picker" aria-label="Cartella degli episodi">
+      <label><span>Nuova cartella</span><input id="videoFolderPath" type="text" spellcheck="false" placeholder="Scegli una cartella di episodi o film"></label>
+      <label><span>Nome raccolta</span><input id="libraryLabel" type="text" maxlength="60" placeholder="Es. Film di Conan"></label>
+      <label><span>Tipo</span><select id="libraryKind"><option value="episodes">Episodi</option><option value="movies">Film</option></select></label>
+      <button id="chooseFolder" class="secondary" type="button">Sfoglia…</button>
+      <button id="applyFolder" class="primary" type="button">Aggiungi cartella</button>
+      <span class="auto-status">● Riconoscimento automatico attivo</span>
+    </section>
+
+    <section class="toolbar">
+      <label class="search"><span>Cerca</span><input id="search" type="search" placeholder="Numero, titolo italiano, inglese o nome file"></label>
+      <label><span>Cartella</span><select id="folderFilter"><option value="all">Raccolta completa</option></select></label>
+      <label><span>Mostra</span><select id="filter"><option value="all">Tutti</option><option value="anime_orig">ANIME ORIG</option><option value="watched">Visti</option><option value="unwatched">Non visti</option><option value="custom">Nome modificato</option><option value="plain">Nome standard</option><option value="mov">Solo MOV</option></select></label>
+      <button id="reload" class="secondary" type="button">Aggiorna cartella</button>
+    </section>
+
+    <div id="error" class="error hidden" role="alert"></div>
+    <section id="list" class="episode-list" aria-live="polite"></section>
+  </main>
+
+  <dialog id="editor">
+    <form method="dialog" id="editorForm">
+      <div class="dialog-head">
+        <div><p class="eyebrow">Rinomina episodio</p><h2 id="dialogTitle">Episodio</h2></div>
+        <button class="icon" type="button" data-close-editor aria-label="Chiudi">×</button>
+      </div>
+      <figure id="titleCardPanel" class="title-card hidden">
+        <a id="titleCardLink" href="#" target="_blank" title="Apri l’immagine a dimensione intera"><img id="titleCardImage" alt="Schermata del titolo dell’episodio"></a>
+        <figcaption><strong>Schermata del titolo verificata</strong><span id="titleCardCaption"></span></figcaption>
+      </figure>
+      <dl class="details">
+        <dt>Cartella</dt><dd id="currentFolder">—</dd>
+        <dt>Numero JAP</dt><dd><input id="episodeNumber" class="number-input" type="number" min="1" max="9999" step="1"></dd>
+        <dt>NOME ITA</dt><dd id="excelTitle">—</dd>
+        <dt>NOME ING</dt><dd id="englishTitle">—</dd>
+        <dt>NOME JAP</dt><dd id="japaneseTitle">—</dd>
+        <dt>Nome attuale</dt><dd id="currentName">—</dd>
+      </dl>
+      <div id="referenceTitlesEditor" class="missing-title-editor">
+        <p><strong>Titoli di riferimento modificabili</strong><br>Puoi correggere o aggiungere separatamente i titoli italiano, inglese e giapponese. Svuota un campo per ripristinare il valore originale dell’Excel.</p>
+        <label class="title-field"><span>NOME ITA</span><input id="referenceIta" type="text" maxlength="240" autocomplete="off" placeholder="Titolo italiano"></label>
+        <label class="title-field"><span>NOME ENG</span><input id="referenceEng" type="text" maxlength="240" autocomplete="off" placeholder="Titolo inglese"></label>
+        <label class="title-field"><span>NOME JAP</span><input id="referenceJap" type="text" maxlength="240" autocomplete="off" placeholder="Titolo giapponese"></label>
+        <div class="quick-actions"><button id="saveReferenceTitles" class="secondary" type="button">Salva titoli di riferimento</button></div>
+      </div>
+      <div class="personal-title-editor">
+        <p><strong>Titolo personale</strong><br>Puoi aggiungere una tua etichetta indipendente dal titolo di riferimento.</p>
+        <label class="title-field"><span>Titolo personale</span><input id="manualTitle" type="text" maxlength="240" autocomplete="off" placeholder="Scrivi qui il tuo titolo personale"></label>
+        <div class="quick-actions"><button id="saveTitle" class="secondary" type="button">Salva titolo personale</button></div>
+      </div>
+      <label class="title-field"><span>Nuovo nome completo del file</span><input id="newFileName" type="text" maxlength="240" autocomplete="off" spellcheck="false"></label>
+      <div class="quick-actions"><button id="restoreCurrent" class="secondary" type="button">Ripristina nome attuale</button><button id="standardName" class="secondary" type="button">Usa nome standard</button></div>
+      <div class="preview"><span>Confronto</span><code><b>Prima:</b> <span id="beforeName"></span><br><b>Dopo:</b> <span id="newName"></span></code></div>
+      <p class="warning">“Salva tutte le modifiche” aggiorna i titoli. Il file viene rinominato soltanto se hai modificato anche il campo del nome completo.</p>
+      <div class="dialog-actions"><button class="secondary" type="button" data-close-editor>Annulla</button><button id="confirmRename" class="primary" type="submit">Salva tutte le modifiche</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="playerDialog" class="player-dialog">
+    <div class="player-shell">
+      <div class="dialog-head player-head">
+        <div><p class="eyebrow">Player locale</p><h2 id="playerTitle">Episodio</h2><p id="playerSubtitle" class="player-subtitle"></p></div>
+        <button id="closePlayer" class="icon" type="button" aria-label="Chiudi">×</button>
+      </div>
+      <video id="videoPlayer" controls playsinline preload="metadata"></video>
+      <div class="player-status"><span id="playerTime">00:00 / 00:00</span><span>Il punto di visione viene salvato automaticamente.</span></div>
+    </div>
+  </dialog>
+
+  <div id="toast" class="toast hidden" role="status"></div>
+  <script src="app.js?v=20261017-player-integrato"></script>
+</body>
+</html>

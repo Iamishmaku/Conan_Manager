@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Configurazione e dati personali
+settings.json
+playback_progress.json
+watched.json
+custom_titles.json
+missing_titles.json
+title_overrides.json
+file_registry.json
+rename_log.jsonl
+server_location_check.txt
+
+# Materiale locale non distribuito
+title_cards/*
+!title_cards/.gitkeep
+title_cards.json
+*.mp4
+*.mov
+*.mkv
+*.avi
+
+# Rapporti locali
+Rapporto_*
+Verifica_*
+Lista_*
+Episodi_*
+Filler_*
+
+# Sistema/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

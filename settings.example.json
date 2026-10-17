@@ -1,0 +1,16 @@
+{
+  "libraries": [
+    {
+      "key": "episodi",
+      "label": "Episodi di Detective Conan",
+      "kind": "episodes",
+      "path": "D:\\Percorso\\Alla\\Cartella\\Episodi"
+    },
+    {
+      "key": "film",
+      "label": "Film di Detective Conan",
+      "kind": "movies",
+      "path": "D:\\Percorso\\Alla\\Cartella\\Film"
+    }
+  ]
+}
