@@ -25,8 +25,7 @@ def load_libraries():
                 for item in libraries:
                     if isinstance(item, dict) and str(item.get("path", "")).strip():
                         result.append({"key": str(item.get("key") or f"raccolta-{len(result)+1}"), "label": str(item.get("label") or "Raccolta"), "kind": "movies" if item.get("kind") == "movies" else "episodes", "path": str(item["path"])})
-                if result:
-                    return result
+                return result
             value = str(data.get("video_dir", "")).strip()
             if value:
                 return [{"key": "1-1172", "label": "Episodi", "kind": "episodes", "path": value}]
@@ -47,6 +46,9 @@ WATCHED_PATH = APP_DIR / "watched.json"
 PROGRESS_PATH = APP_DIR / "playback_progress.json"
 TITLE_CARDS_PATH = APP_DIR / "title_cards.json"
 ALLOWED_EXTENSIONS = {".mp4", ".mov"}
+PUBLIC_FILES = {"index.html", "styles.css", "app.js"}
+PUBLIC_DIRECTORIES = {"title_cards"}
+DATA_LOCK = threading.RLock()
 NAME_PATTERN = re.compile(r"^MeitanteiConan_Ep_(\d+)(.*?)_SUB_ITA$", re.IGNORECASE)
 AUTO_NUMBER_PATTERNS = (
     re.compile(r"(?:^|[^a-z0-9])(?:ep|episodio|episode)[ _.-]*(\d{1,4})(?:[^0-9]|$)", re.IGNORECASE),
@@ -88,7 +90,7 @@ def relative_video_path(path, folder_key):
     return path.resolve().relative_to(VIDEO_DIRS[folder_key].resolve()).as_posix()
 
 def resolve_video_path(folder_key, relative_path):
-    if folder_key not in VIDEO_DIRS:
+    if not isinstance(folder_key, str) or folder_key not in VIDEO_DIRS:
         raise ValueError("Cartella episodio non valida")
     if not isinstance(relative_path, str) or not relative_path.strip():
         raise ValueError("Percorso episodio non valido")
@@ -266,7 +268,10 @@ def parse_file(path, folder_key, progress_data=None, media_index=None):
     override_ita = overrides.get("name_ita", "")
     override_eng = overrides.get("name_eng", "")
     override_jap = overrides.get("name_jap", "")
-    watched_at = load_watched().get(f"{folder_key}|{number}", "")
+    watched_data = load_watched()
+    watched_at = watched_data.get(movie_watched_key(folder_key, relative_path), watched_data.get(f"{folder_key}|{number}", "")) if is_movie else watched_data.get(f"{folder_key}|{number}", "")
+    if watched_at == "unwatched":
+        watched_at = ""
     playback = (progress_data if progress_data is not None else load_progress()).get(registry_key(folder_key, relative_path), {})
     stat = path.stat()
     return {
@@ -294,6 +299,18 @@ def parse_file(path, folder_key, progress_data=None, media_index=None):
         "num_ita": ref.get("num_ita"),
         "anime_orig": bool(ref.get("anime_orig")), "excel_row": ref.get("excel_row"), "library_kind": library.get("kind", "episodes"),
     }
+
+def parse_existing_file(path, folder_key):
+    """Use the same fallback movie index as inventory when checking identity."""
+    media_index = None
+    if LIBRARY_META.get(folder_key, {}).get("kind") == "movies":
+        video_dir = VIDEO_DIRS[folder_key]
+        paths = sorted(
+            (item for item in video_dir.rglob("*") if item.is_file() and item.suffix.lower() in ALLOWED_EXTENSIONS),
+            key=lambda item: item.relative_to(video_dir).as_posix().lower(),
+        )
+        media_index = next((i for i, item in enumerate(paths, 1) if item.resolve() == path.resolve()), None)
+    return parse_file(path, folder_key, media_index=media_index)
 
 def inventory():
     # Rilegge i dati di riferimento a ogni aggiornamento della pagina, così i
@@ -368,7 +385,7 @@ def add_video_folder(path_value, kind="episodes", label=""):
 
 def remove_video_folder(key):
     global LIBRARIES, VIDEO_DIRS, LIBRARY_META
-    if key not in VIDEO_DIRS:
+    if not isinstance(key, str) or key not in VIDEO_DIRS:
         raise ValueError("Raccolta non trovata")
     LIBRARIES = [item for item in LIBRARIES if item["key"] != key]
     VIDEO_DIRS.pop(key, None); LIBRARY_META.pop(key, None); save_libraries()
@@ -414,13 +431,15 @@ def rename_file(payload):
     if payload.get("confirm") is not True:
         raise ValueError("Conferma mancante")
     folder_key = payload.get("folder_key")
-    if folder_key not in VIDEO_DIRS:
+    if not isinstance(folder_key, str) or folder_key not in VIDEO_DIRS:
         raise ValueError("Cartella episodio non valida")
     video_dir = VIDEO_DIRS[folder_key]
     current_name = payload.get("current_name")
     new_name = validate_new_name(current_name, payload.get("new_name"))
     relative_path = payload.get("relative_path") or current_name
     source = resolve_video_path(folder_key, relative_path)
+    if source.name != current_name:
+        raise ValueError("Il nome file non corrisponde al percorso")
     target = source.with_name(new_name)
     if not source.is_file():
         raise FileNotFoundError(f"File non trovato: {current_name}")
@@ -461,7 +480,7 @@ def save_manual_title(payload):
     folder_key = payload.get("folder_key")
     number = payload.get("number")
     title = payload.get("title")
-    if folder_key not in VIDEO_DIRS:
+    if not isinstance(folder_key, str) or folder_key not in VIDEO_DIRS:
         raise ValueError("Cartella episodio non valida")
     if not isinstance(number, int) or number < 1 or number > 9999:
         raise ValueError("Numero episodio non valido")
@@ -483,7 +502,7 @@ def save_missing_title(payload):
     folder_key = payload.get("folder_key")
     number = payload.get("number")
     title = payload.get("title")
-    if folder_key not in VIDEO_DIRS:
+    if not isinstance(folder_key, str) or folder_key not in VIDEO_DIRS:
         raise ValueError("Cartella episodio non valida")
     if not isinstance(number, int) or number < 1 or number > 9999:
         raise ValueError("Numero episodio non valido")
@@ -507,7 +526,7 @@ def save_missing_title(payload):
 def save_reference_titles(payload):
     folder_key = payload.get("folder_key")
     number = payload.get("number")
-    if folder_key not in VIDEO_DIRS:
+    if not isinstance(folder_key, str) or folder_key not in VIDEO_DIRS:
         raise ValueError("Cartella episodio non valida")
     if not isinstance(number, int) or number < 1 or number > 9999:
         raise ValueError("Numero episodio non valido")
@@ -543,21 +562,34 @@ def save_reference_titles(payload):
     save_title_overrides(data)
     return {"ok": True, "folder_key": folder_key, "number": number, "titles": overrides}
 
+def movie_watched_key(folder_key, relative_path):
+    return f"{folder_key}|movie:{relative_path}"
+
 def set_watched(payload):
     folder_key = payload.get("folder_key")
     number = payload.get("number")
     watched = payload.get("watched")
-    if folder_key not in VIDEO_DIRS:
+    if not isinstance(folder_key, str) or folder_key not in VIDEO_DIRS:
         raise ValueError("Cartella episodio non valida")
     if not isinstance(number, int) or number < 1 or number > 9999:
         raise ValueError("Numero episodio non valido")
     if not isinstance(watched, bool):
         raise ValueError("Stato visto non valido")
     data = load_watched()
-    key = f"{folder_key}|{number}"
+    is_movie = LIBRARY_META.get(folder_key, {}).get("kind") == "movies"
+    if is_movie:
+        path = resolve_video_path(folder_key, payload.get("relative_path"))
+        if not path.is_file() or path.suffix.lower() not in ALLOWED_EXTENSIONS:
+            raise FileNotFoundError("Video non trovato")
+        key = movie_watched_key(folder_key, relative_video_path(path, folder_key))
+    else:
+        key = f"{folder_key}|{number}"
     watched_at = datetime.now().astimezone().isoformat(timespec="seconds") if watched else ""
     if watched:
         data[key] = watched_at
+    elif is_movie:
+        # Explicitly mask legacy number-based state without changing other films.
+        data[key] = "unwatched"
     else:
         data.pop(key, None)
     save_watched(data)
@@ -567,11 +599,14 @@ def set_progress(payload):
     folder_key = payload.get("folder_key")
     relative_path = payload.get("relative_path")
     number = payload.get("number")
-    if folder_key not in VIDEO_DIRS or not isinstance(number, int):
+    if not isinstance(folder_key, str) or folder_key not in VIDEO_DIRS or not isinstance(number, int) or not 1 <= number <= 9999:
         raise ValueError("Episodio non valido")
     path = resolve_video_path(folder_key, relative_path)
     if not path.is_file() or path.suffix.lower() not in ALLOWED_EXTENSIONS:
         raise FileNotFoundError("Video non trovato")
+    record = parse_existing_file(path, folder_key)
+    if record is None or (not record["is_movie"] and record["number"] != number):
+        raise ValueError("L'identita corrente dell'episodio non corrisponde")
     try:
         position = max(0.0, float(payload.get("position", 0)))
         duration = max(0.0, float(payload.get("duration", 0)))
@@ -579,7 +614,7 @@ def set_progress(payload):
         raise ValueError("Tempo di riproduzione non valido")
     if position != position or duration != duration or position > 86400 or duration > 86400:
         raise ValueError("Tempo di riproduzione non valido")
-    completed = bool(payload.get("completed")) or (duration > 0 and position >= duration - 15)
+    completed = bool(payload.get("completed")) or (duration > 0 and position > 0 and position >= max(duration * 0.9, duration - 15))
     if completed and duration:
         position = duration
     item = {
@@ -590,22 +625,27 @@ def set_progress(payload):
     data[registry_key(folder_key, relative_video_path(path, folder_key))] = item
     save_progress(data)
     if completed:
-        set_watched({"folder_key": folder_key, "number": number, "watched": True})
+        set_watched({"folder_key": folder_key, "relative_path": relative_path, "number": number, "watched": True})
     return {"ok": True, "playback": item}
 
 def play_file(payload):
     folder_key = payload.get("folder_key")
     current_name = payload.get("current_name")
     number = payload.get("number")
-    if folder_key not in VIDEO_DIRS:
+    if not isinstance(folder_key, str) or folder_key not in VIDEO_DIRS:
         raise ValueError("Cartella episodio non valida")
     if not isinstance(current_name, str) or Path(current_name).name != current_name:
         raise ValueError("Nome file non valido")
     if not isinstance(number, int) or number < 1 or number > 9999:
         raise ValueError("Numero episodio non valido")
     path = resolve_video_path(folder_key, payload.get("relative_path") or current_name)
+    if path.name != current_name:
+        raise ValueError("Il nome file non corrisponde al percorso")
     if not path.is_file() or path.suffix.lower() not in ALLOWED_EXTENSIONS:
         raise FileNotFoundError(f"File non trovato: {current_name}")
+    record = parse_existing_file(path, folder_key)
+    if record is None or (not record["is_movie"] and record["number"] != number):
+        raise ValueError("L'identita corrente dell'episodio non corrisponde")
     os.startfile(str(path))
     return set_watched({"folder_key": folder_key, "number": number, "watched": True})
 
@@ -614,7 +654,7 @@ def change_episode_number(payload):
     current_name = payload.get("current_name")
     old_number = payload.get("old_number")
     new_number = payload.get("new_number")
-    if folder_key not in VIDEO_DIRS:
+    if not isinstance(folder_key, str) or folder_key not in VIDEO_DIRS:
         raise ValueError("Cartella episodio non valida")
     if not isinstance(current_name, str) or Path(current_name).name != current_name:
         raise ValueError("Nome file non valido")
@@ -622,6 +662,8 @@ def change_episode_number(payload):
         raise ValueError("Numero JAP non valido")
     relative_path = payload.get("relative_path") or current_name
     source = resolve_video_path(folder_key, relative_path)
+    if source.name != current_name:
+        raise ValueError("Il nome file non corrisponde al percorso")
     if not source.is_file():
         raise FileNotFoundError(f"File non trovato: {current_name}")
     current_record = parse_file(source, folder_key)
@@ -648,10 +690,6 @@ def change_episode_number(payload):
         if old_key in data:
             data[new_key] = data.pop(old_key)
             saver(data)
-    old_card, new_card = str(old_number), str(new_number)
-    if old_card in TITLE_CARDS:
-        TITLE_CARDS[new_card] = TITLE_CARDS.pop(old_card)
-        save_title_cards(TITLE_CARDS)
     registry = load_registry()
     registry.pop(registry_key(folder_key, relative_path), None)
     registry.pop(registry_key(folder_key, current_name), None)
@@ -661,8 +699,39 @@ def change_episode_number(payload):
     save_registry(registry)
     return {"ok": True, "record": parse_file(source, folder_key)}
 
+def handle_api_post(endpoint, payload):
+    if endpoint == "/api/select-folder":
+        return choose_video_folder()
+    with DATA_LOCK:
+        if endpoint == "/api/video-folder":
+            return add_video_folder(payload.get("path"), payload.get("kind"), payload.get("label"))
+        if endpoint == "/api/remove-folder":
+            return remove_video_folder(payload.get("key"))
+        if endpoint == "/api/rename":
+            return rename_file(payload)
+        if endpoint == "/api/missing-title":
+            return save_missing_title(payload)
+        if endpoint == "/api/reference-titles":
+            return save_reference_titles(payload)
+        if endpoint == "/api/watched":
+            return set_watched(payload)
+        if endpoint == "/api/progress":
+            return set_progress(payload)
+        if endpoint == "/api/episode-number":
+            return change_episode_number(payload)
+        return save_manual_title(payload)
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "ConanManager/2.0"
+
+    def is_trusted_host(self):
+        host = self.headers.get("Host", "").lower()
+        if host.startswith("["):
+            hostname = host[1:].split("]", 1)[0]
+        else:
+            hostname = host.split(":", 1)[0]
+        return hostname in {"127.0.0.1", "localhost", "::1"}
+
     def send_json(self, status, payload):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
@@ -670,12 +739,27 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
+    def send_range_not_satisfiable(self, size):
+        self.send_response(416)
+        self.send_header("Content-Range", f"bytes */{size}")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def do_GET(self):
+        if not self.is_trusted_host():
+            self.send_error(421, "Host non consentito")
+            return
         parsed = urlparse(self.path)
         if parsed.path == "/api/episodes":
             try:
-                self.send_json(200, inventory())
+                with DATA_LOCK:
+                    result = inventory()
+                self.send_json(200, result)
             except Exception as error:
                 self.send_json(500, {"error": str(error)})
             return
@@ -684,7 +768,8 @@ class Handler(BaseHTTPRequestHandler):
                 query = parse_qs(parsed.query)
                 folder_key = query.get("folder_key", [""])[0]
                 relative_path = query.get("path", [""])[0]
-                candidate = resolve_video_path(folder_key, relative_path)
+                with DATA_LOCK:
+                    candidate = resolve_video_path(folder_key, relative_path)
                 if not candidate.is_file() or candidate.suffix.lower() not in ALLOWED_EXTENSIONS:
                     raise FileNotFoundError("Video non trovato")
                 size = candidate.stat().st_size
@@ -693,18 +778,23 @@ class Handler(BaseHTTPRequestHandler):
                 if range_header:
                     match = re.fullmatch(r"bytes=(\d*)-(\d*)", range_header.strip())
                     if not match:
-                        self.send_error(416)
+                        self.send_range_not_satisfiable(size)
                         return
                     first, last = match.groups()
-                    if first:
-                        start = int(first)
-                        end = min(int(last), size - 1) if last else size - 1
-                    elif last:
-                        start = max(0, size - int(last))
+                    try:
+                        if first:
+                            start = int(first)
+                            end = min(int(last), size - 1) if last else size - 1
+                        elif last:
+                            start = max(0, size - int(last))
+                        else:
+                            self.send_range_not_satisfiable(size)
+                            return
+                    except ValueError:
+                        self.send_range_not_satisfiable(size)
+                        return
                     if start >= size or end < start:
-                        self.send_response(416)
-                        self.send_header("Content-Range", f"bytes */{size}")
-                        self.end_headers()
+                        self.send_range_not_satisfiable(size)
                         return
                     status = 206
                 length = end - start + 1
@@ -727,28 +817,51 @@ class Handler(BaseHTTPRequestHandler):
                         remaining -= len(chunk)
             except (BrokenPipeError, ConnectionResetError):
                 pass
-            except (ValueError, FileNotFoundError) as error:
+            except (ValueError, FileNotFoundError, OSError) as error:
                 self.send_error(404, str(error))
             return
-        relative = unquote(parsed.path.lstrip("/")) or "index.html"
-        candidate = (APP_DIR / relative).resolve()
         try:
-            candidate.relative_to(APP_DIR)
-        except ValueError:
+            relative = unquote(parsed.path.lstrip("/")) or "index.html"
+            candidate = (APP_DIR / relative).resolve()
+            relative_parts = candidate.relative_to(APP_DIR).parts
+        except (OSError, ValueError):
             self.send_error(403)
             return
-        if not candidate.is_file():
+        allowed = (
+            len(relative_parts) == 1 and relative_parts[0] in PUBLIC_FILES
+        ) or (
+            len(relative_parts) > 1 and relative_parts[0] in PUBLIC_DIRECTORIES
+        )
+        if not allowed or not candidate.is_file():
             self.send_error(404)
             return
-        content = candidate.read_bytes()
-        content_type = mimetypes.guess_type(candidate.name)[0] or "application/octet-stream"
-        self.send_response(200)
-        self.send_header("Content-Type", content_type + ("; charset=utf-8" if content_type.startswith("text/") else ""))
-        self.send_header("Content-Length", str(len(content)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(content)
+        try:
+            content = candidate.read_bytes()
+            content_type = mimetypes.guess_type(candidate.name)[0] or "application/octet-stream"
+            self.send_response(200)
+            self.send_header("Content-Type", content_type + ("; charset=utf-8" if content_type.startswith("text/") else ""))
+            self.send_header("Content-Length", str(len(content)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(content)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except OSError:
+            self.send_error(404)
+
     def do_POST(self):
+        if not self.is_trusted_host():
+            self.send_error(421, "Host non consentito")
+            return
+        origin = self.headers.get("Origin")
+        if origin:
+            parsed_origin = urlparse(origin)
+            if parsed_origin.scheme != "http" or parsed_origin.netloc.lower() != self.headers.get("Host", "").lower() or parsed_origin.path or parsed_origin.params or parsed_origin.query or parsed_origin.fragment:
+                self.send_error(403, "Origine non consentita")
+                return
+        if self.headers.get_content_type() != "application/json":
+            self.send_error(415, "Richiesto JSON")
+            return
         endpoint = urlparse(self.path).path
         if endpoint not in {"/api/rename", "/api/title", "/api/missing-title", "/api/reference-titles", "/api/watched", "/api/progress", "/api/episode-number", "/api/select-folder", "/api/video-folder", "/api/remove-folder"}:
             self.send_error(404)
@@ -758,26 +871,9 @@ class Handler(BaseHTTPRequestHandler):
             if length <= 0 or length > 32768:
                 raise ValueError("Richiesta non valida")
             payload = json.loads(self.rfile.read(length).decode("utf-8"))
-            if endpoint == "/api/select-folder":
-                result = choose_video_folder()
-            elif endpoint == "/api/video-folder":
-                result = add_video_folder(payload.get("path"), payload.get("kind"), payload.get("label"))
-            elif endpoint == "/api/remove-folder":
-                result = remove_video_folder(payload.get("key"))
-            elif endpoint == "/api/rename":
-                result = rename_file(payload)
-            elif endpoint == "/api/missing-title":
-                result = save_missing_title(payload)
-            elif endpoint == "/api/reference-titles":
-                result = save_reference_titles(payload)
-            elif endpoint == "/api/watched":
-                result = set_watched(payload)
-            elif endpoint == "/api/progress":
-                result = set_progress(payload)
-            elif endpoint == "/api/episode-number":
-                result = change_episode_number(payload)
-            else:
-                result = save_manual_title(payload)
+            if not isinstance(payload, dict):
+                raise ValueError("Richiesta non valida")
+            result = handle_api_post(endpoint, payload)
             self.send_json(200, result)
         except FileExistsError as error:
             self.send_json(409, {"error": str(error)})
@@ -785,6 +881,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(400, {"error": str(error)})
         except Exception as error:
             self.send_json(500, {"error": str(error)})
+
     def log_message(self, format, *args):
         print(f"[{self.log_date_time_string()}] {format % args}")
 
